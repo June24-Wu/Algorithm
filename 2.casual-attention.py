@@ -12,21 +12,32 @@ class Solution:
         """
         L = q.shape[-2]
         S = k.shape[-2]
-        d_k = torch.tensor(q.shape[-1], dtype=torch.float32)  # D
-        score = q @ k.transpose(-2, -1) / torch.sqrt(d_k)  # [N,H,L,S]
+        D = q.shape[-1]
+
+        d_k = torch.tensor(D,dtype = torch.float32)
+
+        # q @ k.T / d_k
+        # [N,H,L,D] @ [N,H,D,S] -> [N,H,L,S]
+        score = q @ k.transpose(-2,-1) / torch.sqrt(d_k)
+
+        
         if casual:
-            casual_mask = torch.tril(torch.ones(
-                L, S, device=q.device)).unsqueeze(0).unsqueeze(0)
+            casual_mask = torch.tril(torch.ones(L,S)).unsqueeze(0).unsqueeze(0)
             if mask is not None:
-                mask = casual_mask * mask
+                mask = mask * casual_mask
             else:
                 mask = casual_mask
-
+        
         if mask is not None:
-            score = score.masked_fill(mask == 0, -1e9)
-        weight = F.softmax(score, dim=-1)
-        out = weight @ v
-        return out, weight
+            score = score.masked_fill(mask == 0,-1e9) # [N,H,L,S]
+        attn = F.softmax(score,dim = -1)
+
+        # [N,H,L,S] @ [N,H,S,D] -> [N,H,L,D]
+        print(attn.shape,v.transpose(-2,-1).shape)
+        out = attn @ v
+        
+        return out, attn
+
 
 
 def test_case_1(sol):

@@ -2,7 +2,13 @@ import torch
 import torch.nn.functional as F
 
 class Solution:
-    def self_attention(self, q, k, v, mask=None):
+    def self_attention(
+        self,
+        q,
+        k,
+        v,
+        mask=None
+    ):
         """
         # q = [N, H, L, D]
         # k = [N, H, S, D]
@@ -10,16 +16,13 @@ class Solution:
         # return: [N,H,L,D]
         """
         
-        d_k = torch.tensor(q.shape[-1], dtype=torch.float32)
-
-        score = q @ k.transpose(-2, -1) / torch.sqrt(d_k)  # [N,H,L,S]
-
-        if mask is not None:
-            score = score.masked_fill(mask == 0, 1e-9)  # [N,H,L,S]
-        weight = F.softmax(score, dim=-1)  # [N,H,L,S]
-        attention = weight @ v  # [N,H,L,S] x [N,H,L,D] = [N,H,L,D]
-        return attention, weight
-
+        d_k = torch.tensor(q.shape[-1],dtype = torch.float32)
+        # [N,H,L,D] @ [N,H,D,L] -> [N,H,L,L]
+        score = q @ k.transpose(-2,-1) / torch.sqrt(d_k)
+        
+        attn = F.softmax(score,dim = -1) # [N,H,L,L]
+        out = attn @ v # [N,H,L,L] @ [N,H,L,D] -> [N,H,L,D]
+        return out, attn
 
 def test_case_1(sol):
     print("Running Test Case 1")
