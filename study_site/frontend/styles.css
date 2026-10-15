@@ -194,6 +194,9 @@ svg { width: 21px; height: 21px; vertical-align: middle; }
 .prose tr:last-child td { border-bottom: 0; }
 .prose blockquote { margin: 20px 0; padding: 1px 16px; border-left: 2px solid var(--accent); color: var(--muted); background: var(--soft); }
 .prose img { max-width: 100%; height: auto; }
+.practice-file { border-top: 1px solid var(--line); margin-top: 30px; padding-top: 5px; }
+.practice-actions { display: flex; flex-wrap: wrap; gap: 8px 18px; }
+.practice-actions a { font-size: .8em; }
 .codehilite .k, .codehilite .kn, .codehilite .kd, .codehilite .ow { color: var(--accent); font-weight: 600; }
 .codehilite .s, .codehilite .s1, .codehilite .s2, .codehilite .sd { color: var(--clay); }
 .codehilite .c, .codehilite .c1, .codehilite .cm { color: var(--muted); font-style: italic; }

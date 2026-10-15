@@ -44,5 +44,13 @@
   },
   "translations": {
     "AIInfraGuide_Interview/comprehensive/general/ai-infra-first-round/README.md": "content/zh/ai-infra-first-round.md"
-  }
+  },
+  "embedded_practices": [
+    {
+      "source": "AIInfraGuide_Interview/comprehensive/general/ai-infra-first-round/7.grouped_query_attention/7.grouped_query_attention.py",
+      "parent": "AIInfraGuide_Interview/comprehensive/general/ai-infra-first-round/README.md",
+      "question": "question-7",
+      "tests": "AIInfraGuide_Interview/comprehensive/general/ai-infra-first-round/7.grouped_query_attention/7.grouped_query_attention_test.py"
+    }
+  ]
 }

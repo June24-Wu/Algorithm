@@ -86,7 +86,7 @@ class SiteTests(unittest.TestCase):
         self.assertNotIn("javascript:", value["intro"])
         self.assertNotIn("onerror=", value["intro"])
 
-    def test_assignment_page_excludes_the_separate_test_runner(self):
+    def test_assignment_is_embedded_in_question_seven_in_both_languages(self):
         relatives = {document["relative"] for document in self.catalog["documents"]}
         assignment = (
             "AIInfraGuide_Interview/comprehensive/general/ai-infra-first-round/"
@@ -98,8 +98,38 @@ class SiteTests(unittest.TestCase):
             "7.grouped_query_attention/"
             "7.grouped_query_attention_test.py"
         )
-        self.assertIn(assignment, relatives)
+        self.assertNotIn(assignment, relatives)
         self.assertNotIn(test_runner, relatives)
+        documents = [doc for doc in self.catalog["documents"] if doc["collection"] == "ai-infra"]
+        self.assertEqual(len(documents), 1)
+        parent = documents[0]
+        payload = json.loads((self.output / "data/documents" / parent["file"]).read_text())
+        for version in payload["versions"].values():
+            self.assertEqual(len(version["sections"]), 7)
+            self.assertFalse(any(section.get("practices") for section in version["sections"][:6]))
+            practices = version["sections"][6]["practices"]
+            self.assertEqual(len(practices), 1)
+            practice = practices[0]
+            self.assertEqual(practice["filename"], "7.grouped_query_attention.py")
+            self.assertIn("GroupQueryAttention", practice["html"])
+            self.assertNotIn("Automated tests for the Grouped Query Attention assignment", practice["html"])
+            self.assertEqual(practice["downloadUrl"], "sources/" + assignment)
+            self.assertEqual(practice["testDownloadUrl"], "sources/" + test_runner)
+        for relative in (assignment, test_runner):
+            self.assertEqual((self.output / "sources" / relative).read_bytes(), (REPOSITORY_ROOT / relative).read_bytes())
+        old_identifier = "ai-infra/comprehensive/general/ai-infra-first-round/7.grouped_query_attention/7.grouped_query_attention"
+        self.assertEqual(self.catalog["documentAliases"][old_identifier], {"documentId": parent["id"], "question": "question-7"})
+        self.assertEqual(parent["practiceFiles"], [{"filename": "7.grouped_query_attention.py", "question": "question-7"}])
+
+    def test_embedded_source_links_target_the_parent_question(self):
+        source = REPOSITORY_ROOT / "AIInfraGuide_Interview/comprehensive/general/ai-infra-first-round/README.md"
+        assignment = source.parent / "7.grouped_query_attention/7.grouped_query_attention.py"
+        version = render_version(
+            "# Example\n\n[Exercise](./7.grouped_query_attention/7.grouped_query_attention.py)",
+            "Example", source,
+            {assignment.resolve(): {"collection": "ai-infra", "id": "parent", "question": "question-7"}},
+        )
+        self.assertIn('href="#collection=ai-infra&amp;doc=parent&amp;question=question-7"', version["intro"])
 
     def test_static_files_and_local_api(self):
         server = ThreadingHTTPServer(("127.0.0.1", 0), partial(Handler, directory=str(self.output)))

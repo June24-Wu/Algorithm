@@ -49,6 +49,11 @@ def first_title(text: str, fallback: str) -> str:
     return match.group(1).strip() if match else fallback
 
 
+def fenced_python(source: str) -> str:
+    fence = "`" * max(3, max((len(m.group()) + 1 for m in re.finditer(r"`+", source)), default=3))
+    return f"{fence}python\n{source}\n{fence}\n"
+
+
 def load_markdown(path: Path) -> tuple[str, str]:
     if path.suffix == ".md":
         text = path.read_text(encoding="utf-8")
@@ -59,12 +64,11 @@ def load_markdown(path: Path) -> tuple[str, str]:
     except SyntaxError:
         description = ""
     title = description.splitlines()[0].rstrip(".") if description else path.stem.replace("_", " ")
-    fence = "`" * max(3, max((len(m.group()) + 1 for m in re.finditer(r"`+", source)), default=3))
     text = (
         f"# {title}\n\n"
         "This practice file is shown directly from the repository. Read the assignment "
         "and implementation below, or download the Python source to run it locally.\n\n"
-        f"{fence}python\n{source}\n{fence}\n"
+        f"{fenced_python(source)}"
     )
     return title, text
 
@@ -95,7 +99,10 @@ def render_version(text: str, title: str, source_path: Path, link_map: dict) -> 
                 resolved = resolved / "README.md"
             if resolved in link_map:
                 doc = link_map[resolved]
-                destination = "#" + urlencode({"collection": doc["collection"], "doc": doc["id"]})
+                parameters = {"collection": doc["collection"], "doc": doc["id"]}
+                if doc.get("question"):
+                    parameters["question"] = doc["question"]
+                destination = "#" + urlencode(parameters)
             else:
                 try:
                     relative = resolved.relative_to(REPOSITORY_ROOT)
@@ -169,6 +176,8 @@ def build(output: Path | None = None) -> dict:
     (output / ".nojekyll").touch()
 
     documents, link_map, inputs, indexes = [], {}, [], []
+    embedded_specs = {item["source"]: item for item in config.get("embedded_practices", [])}
+    embedded_inputs, attachments, aliases = {}, {}, {}
     for collection in config["collections"]:
         collection_root = (REPOSITORY_ROOT / collection["directory"]).resolve()
         collection_root.relative_to(REPOSITORY_ROOT)
@@ -192,9 +201,40 @@ def build(output: Path | None = None) -> dict:
                 "kind": "questions" if source.suffix == ".md" else "practice",
                 "file": hashlib.sha256(identifier.encode()).hexdigest()[:16] + ".json",
             }
-            inputs.append((source, title, text, entry))
             link_map[source.resolve()] = entry
-            documents.append(entry)
+            if relative in embedded_specs:
+                embedded_inputs[relative] = (source, entry)
+            else:
+                inputs.append((source, title, text, entry))
+                documents.append(entry)
+
+    for relative, spec in embedded_specs.items():
+        if relative not in embedded_inputs:
+            raise ValueError(f"Embedded practice is not a published source: {relative}")
+        source, entry = embedded_inputs[relative]
+        parent = next((doc for doc in documents if doc["relative"] == spec["parent"]), None)
+        if parent is None or parent["collection"] != entry["collection"]:
+            raise ValueError(f"Embedded practice needs a parent in the same collection: {relative}")
+        aliases[entry["id"]] = {"documentId": parent["id"], "question": spec["question"]}
+        link_map[source.resolve()] = {**parent, "question": spec["question"]}
+        practice = {
+            "filename": source.name,
+            "downloadUrl": "sources/" + quote(relative),
+            "sourceUrl": f"{config['repository']}/blob/{config['branch']}/{quote(relative)}",
+        }
+        downloads = [source]
+        if spec.get("tests"):
+            tests = (REPOSITORY_ROOT / spec["tests"]).resolve()
+            tests.relative_to(source.parent.resolve())
+            if not tests.is_file() or not tests.name.endswith("_test.py"):
+                raise ValueError(f"Embedded practice test runner is missing: {spec['tests']}")
+            downloads.append(tests)
+            practice["testDownloadUrl"] = "sources/" + quote(tests.relative_to(REPOSITORY_ROOT).as_posix())
+        for download in downloads:
+            destination = output / "sources" / download.relative_to(REPOSITORY_ROOT)
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(download, destination)
+        attachments.setdefault(parent["relative"], []).append((source, spec["question"], practice))
 
     for source in indexes:
         relative = source.relative_to(REPOSITORY_ROOT)
@@ -214,11 +254,23 @@ def build(output: Path | None = None) -> dict:
             versions["zh"] = render_version(translated, first_title(translated, title), source, link_map)
             if len(versions["en"]["sections"]) != len(versions["zh"]["sections"]):
                 raise ValueError(f"Translation question count differs: {entry['relative']}")
+        for practice_source, question, practice in attachments.get(entry["relative"], []):
+            rendered = render_version(
+                f"# {practice_source.name}\n\n{fenced_python(practice_source.read_text(encoding='utf-8'))}",
+                practice_source.name, practice_source, link_map,
+            )
+            for version in versions.values():
+                section = next((section for section in version["sections"] if section["id"] == question), None)
+                if section is None:
+                    raise ValueError(f"Embedded practice question is missing: {entry['relative']} / {question}")
+                section.setdefault("practices", []).append({**practice, "html": rendered["intro"]})
+                version["minutes"] += rendered["minutes"]
         entry.update({
             "title": {language: value["title"] for language, value in versions.items()},
             "languages": list(versions), "questions": len(versions["en"]["sections"]),
             "minutes": versions["en"]["minutes"],
             "outline": {language: [{"id": section["id"], "title": section["title"]} for section in value["sections"]] for language, value in versions.items()},
+            "practiceFiles": [{"filename": practice["filename"], "question": question} for _, question, practice in attachments.get(entry["relative"], [])],
             "sourceUrl": f"{config['repository']}/blob/{config['branch']}/{quote(entry['relative'])}",
             "downloadUrl": "sources/" + quote(entry["relative"]),
         })
@@ -236,7 +288,7 @@ def build(output: Path | None = None) -> dict:
             "defaultDocument": members[0]["id"] if members else None,
             "tree": build_tree(collection, members, config["directory_titles"]),
         })
-    catalog = {"schema": 1, "repository": config["repository"], "branch": config["branch"], "collections": collections, "documents": documents}
+    catalog = {"schema": 1, "repository": config["repository"], "branch": config["branch"], "collections": collections, "documents": documents, "documentAliases": aliases}
     (output / "data/catalog.json").write_text(json.dumps(catalog, ensure_ascii=False), encoding="utf-8")
     print(f"Built {len(collections)} collections, {len(documents)} documents, and {sum(doc['questions'] for doc in documents)} questions into {output}")
     return catalog

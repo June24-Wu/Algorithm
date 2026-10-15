@@ -90,6 +90,13 @@ function treeLink(identifier, title, selected, collection) {
   return `<a class="tree-link ${identifier === selected ? 'active' : ''}" ${identifier === selected ? 'aria-current="page"' : ''} href="${route(collection.id, identifier)}"><span class="page-icon">${icon('file')}</span><span>${escapeHTML(title)}</span></a>`;
 }
 
+function renderPractices(practices = [], lang = 'en') {
+  const labels = lang === 'zh'
+    ? { title: '编程练习', download: '下载实现 .py', tests: '下载测试 .py', source: '查看源码' }
+    : { title: 'Implementation exercise', download: 'Download implementation .py', tests: 'Download tests .py', source: 'View source' };
+  return practices.map(practice => `<section class="practice-file"><h3>${labels.title} · <code>${escapeHTML(practice.filename)}</code></h3><p class="practice-actions"><a href="${escapeHTML(practice.downloadUrl)}" download>${labels.download} ↓</a>${practice.testDownloadUrl ? `<a href="${escapeHTML(practice.testDownloadUrl)}" download>${labels.tests} ↓</a>` : ''}<a href="${escapeHTML(practice.sourceUrl)}" target="_blank" rel="noopener noreferrer">${labels.source} ↗</a></p>${practice.html}</section>`).join('');
+}
+
 async function render() {
   if (!catalog) return;
   const sequence = ++renderSequence;
@@ -99,7 +106,14 @@ async function render() {
   if (!collectionId) { renderHome(); return; }
   const collection = catalog.collections.find(item => item.id === collectionId);
   if (!collection) { renderError('This collection could not be found. Return to the library to choose an available collection.'); return; }
-  const identifier = params.get('doc') || collection.defaultDocument;
+  const requestedIdentifier = params.get('doc') || collection.defaultDocument;
+  const alias = catalog.documentAliases?.[requestedIdentifier];
+  const identifier = alias?.documentId || requestedIdentifier;
+  if (alias) {
+    params.set('doc', identifier);
+    params.set('question', alias.question);
+    history.replaceState(null, '', '#' + params.toString());
+  }
   const metadata = catalog.documents.find(doc => doc.id === identifier && doc.collection === collection.id);
   if (!metadata) { renderError('This page could not be found. Its source may have been moved or removed.'); return; }
   const lang = collection.id === 'ai-infra' ? language : 'en';
@@ -130,7 +144,7 @@ async function render() {
         <div class="reader-columns"><article class="article"><header class="article-header"><div class="article-kicker">${escapeHTML(collection.eyebrow)} ${metadata.kind === 'questions' ? ' / ' + ordinal(catalog.documents.filter(doc => doc.collection === collection.id).findIndex(doc => doc.id === identifier) + 1) : ' / PYTHON'}</div><h1>${escapeHTML(version.title)}</h1><p class="article-subtitle">${collection.id === 'ai-infra' ? labels.subtitle : escapeHTML(collection.description)}</p>
           <div class="article-metadata">${questionCount ? `<span>${questionCount} ${labels.questions}</span>` : '<span>Python source</span>'}<span>${version.minutes} ${labels.minutes}</span><span>${metadata.languages.length > 1 ? 'EN / 中文' : 'EN'}</span><a href="${escapeHTML(metadata.sourceUrl)}" target="_blank" rel="noopener noreferrer">${labels.source} ↗</a></div></header>
           ${translated ? '' : `<div class="translation-notice">${labels.fallback}</div>`}<div class="article-intro prose">${version.intro}</div>
-          ${questionCount ? `<div class="question-toolbar"><span>${labels.questionList} / ${ordinal(questionCount)}</span><button type="button" id="toggle-answers">${labels.collapse}</button></div>${version.sections.map((section, index) => `<details class="question-card" id="${escapeHTML(section.id)}" open><summary><span class="question-number">${ordinal(index + 1)}</span><h2 class="question-title">${escapeHTML(questionTitle(section.title))}</h2><span class="question-chevron" aria-hidden="true">⌄</span></summary><div class="answer prose">${section.html}</div></details>`).join('')}` : ''}
+          ${questionCount ? `<div class="question-toolbar"><span>${labels.questionList} / ${ordinal(questionCount)}</span><button type="button" id="toggle-answers">${labels.collapse}</button></div>${version.sections.map((section, index) => `<details class="question-card" id="${escapeHTML(section.id)}" open><summary><span class="question-number">${ordinal(index + 1)}</span><h2 class="question-title">${escapeHTML(questionTitle(section.title))}</h2><span class="question-chevron" aria-hidden="true">⌄</span></summary><div class="answer prose">${section.html}${renderPractices(section.practices, translated ? lang : 'en')}</div></details>`).join('')}` : ''}
           <div class="reader-end"><span>${labels.end}</span><a href="#" id="back-to-top">${labels.top}</a>${metadata.kind === 'practice' ? `<a href="${escapeHTML(metadata.downloadUrl)}" download>Download .py ↓</a>` : ''}</div>
         </article><aside class="toc" aria-label="${escapeHTML(labels.onPage)}"><div class="toc-label">${questionCount ? labels.onPage : 'Source file'}</div>${version.sections.map(section => `<a href="${route(collection.id, identifier, section.id)}" data-question="${escapeHTML(section.id)}">${escapeHTML(section.title)}</a>`).join('')}<a class="toc-source" href="${escapeHTML(metadata.sourceUrl)}" target="_blank" rel="noopener noreferrer">${labels.source} ↗</a></aside></div>
       </main></div>`;
@@ -193,6 +207,9 @@ function attachSearch() {
             const section = (doc.outline[language] || doc.outline.en)[index];
             matches.push({ title: section.title, question: section.id, doc, collection });
           }
+        }
+        for (const practice of doc.practiceFiles || []) {
+          if (practice.filename.toLocaleLowerCase().includes(query)) matches.push({ title: practice.filename, question: practice.question, doc, collection });
         }
       }
       results.innerHTML = matches.length ? matches.slice(0, 9).map(match => `<a href="${route(match.doc.collection, match.doc.id, match.question)}"><strong>${escapeHTML(match.title)}</strong><small>${escapeHTML(match.collection.title)} ${match.question ? ' / ' + escapeHTML(match.doc.title.en) : ''}</small></a>`).join('') : `<div class="empty-search">${strings[language].noResults}</div>`;
