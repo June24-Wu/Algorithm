@@ -38,7 +38,12 @@ class SiteTests(unittest.TestCase):
             self.assertGreater(collection["documents"], 0)
 
     def test_bilingual_answers_cover_the_same_seven_questions(self):
-        document = next(doc for doc in self.catalog["documents"] if doc["collection"] == "ai-infra")
+        document = next(
+            doc
+            for doc in self.catalog["documents"]
+            if doc["relative"]
+            == "AIInfraGuide_Interview/comprehensive/general/ai-infra-first-round/README.md"
+        )
         data = json.loads((self.output / "data/documents" / document["file"]).read_text())
         self.assertEqual(set(data["versions"]), {"en", "zh"})
         english, chinese = data["versions"]["en"], data["versions"]["zh"]
@@ -80,6 +85,21 @@ class SiteTests(unittest.TestCase):
         self.assertNotIn("<script", value["intro"])
         self.assertNotIn("javascript:", value["intro"])
         self.assertNotIn("onerror=", value["intro"])
+
+    def test_assignment_page_excludes_the_separate_test_runner(self):
+        relatives = {document["relative"] for document in self.catalog["documents"]}
+        assignment = (
+            "AIInfraGuide_Interview/comprehensive/general/ai-infra-first-round/"
+            "7.grouped_query_attention/"
+            "7.grouped_query_attention.py"
+        )
+        test_runner = (
+            "AIInfraGuide_Interview/comprehensive/general/ai-infra-first-round/"
+            "7.grouped_query_attention/"
+            "7.grouped_query_attention_test.py"
+        )
+        self.assertIn(assignment, relatives)
+        self.assertNotIn(test_runner, relatives)
 
     def test_static_files_and_local_api(self):
         server = ThreadingHTTPServer(("127.0.0.1", 0), partial(Handler, directory=str(self.output)))

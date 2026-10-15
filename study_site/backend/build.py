@@ -175,6 +175,8 @@ def build(output: Path | None = None) -> dict:
         for source in sorted(collection_root.rglob("*"), key=lambda path: natural_key(path.as_posix())):
             if not source.is_file() or source.is_symlink() or source.suffix not in {".md", ".py"}:
                 continue
+            if source.suffix == ".py" and source.name.endswith("_test.py"):
+                continue
             if any(part.startswith(".") or part == "__pycache__" for part in source.relative_to(collection_root).parts):
                 continue
             source.resolve().relative_to(collection_root)
