@@ -201,6 +201,76 @@ def _test_forward_values_and_input_safety() -> None:
         raise AssertionError("forward() must not modify X or y in place")
 
 
+def _test_forward_when_all_relu_units_are_active() -> None:
+    model = TwoLayerMLP(1, 1, 1, seed=0)
+    model.W1[:] = 2.0
+    model.b1[:] = 1.0
+    model.W2[:] = 3.0
+    model.b2[:] = -1.0
+    X = np.array([[0.5], [1.5], [2.5]])
+    y = np.array([[4.0], [10.0], [16.0]])
+
+    loss, scores = model.forward(X, y)
+
+    _assert_close(scores, np.array([[5.0], [11.0], [17.0]]), "all-active scores")
+    _assert_close(loss, 1.0, "all-active loss")
+
+
+def _test_forward_when_all_relu_units_are_inactive() -> None:
+    model = TwoLayerMLP(2, 2, 2, seed=0)
+    model.W1[:] = np.array([[0.3, -0.2], [0.1, 0.4]])
+    model.b1[:] = np.array([-10.0, -10.0])
+    model.W2[:] = np.array([[2.0, -1.0], [0.5, 3.0]])
+    model.b2[:] = np.array([0.25, -0.75])
+    X = np.array([[1.0, -2.0], [-3.0, 0.5], [2.0, 1.0]])
+    y = np.array([[0.0, 0.0], [1.0, -1.0], [-0.5, 0.5]])
+
+    loss, scores = model.forward(X, y)
+
+    expected_scores = np.tile(model.b2, (X.shape[0], 1))
+    expected_loss = float(np.mean((expected_scores - y) ** 2))
+    _assert_close(scores, expected_scores, "all-inactive scores")
+    _assert_close(loss, expected_loss, "all-inactive loss")
+
+    gradients = model.backward()
+    for name in ("dX", "dW1", "db1", "dW2"):
+        _assert_close(gradients[name], np.zeros_like(gradients[name]), name)
+
+
+def _test_relu_zero_uses_zero_derivative() -> None:
+    model = TwoLayerMLP(1, 1, 1, seed=0)
+    model.W1[:] = 2.0
+    model.b1[:] = -2.0
+    model.W2[:] = 4.0
+    model.b2[:] = 0.5
+    X = np.array([[1.0]])  # z1 is exactly zero.
+    y = np.array([[2.0]])
+
+    model.forward(X, y)
+    gradients = model.backward()
+
+    _assert_close(gradients["dX"], np.zeros((1, 1)), "dX at ReLU zero")
+    _assert_close(gradients["dW1"], np.zeros((1, 1)), "dW1 at ReLU zero")
+    _assert_close(gradients["db1"], np.zeros(1), "db1 at ReLU zero")
+    _assert_close(gradients["dW2"], np.zeros((1, 1)), "dW2 at ReLU zero")
+    _assert_close(gradients["db2"], np.array([-3.0]), "db2 at ReLU zero")
+
+
+def _test_batch_loss_equals_mean_of_sample_losses() -> None:
+    model, X, y = _make_fixed_case()
+    batch_loss, _ = model.forward(X, y)
+
+    sample_losses = []
+    for sample_index in range(X.shape[0]):
+        sample_loss, _ = model.forward(
+            X[sample_index : sample_index + 1],
+            y[sample_index : sample_index + 1],
+        )
+        sample_losses.append(sample_loss)
+
+    _assert_close(batch_loss, np.mean(sample_losses), "batch MSE decomposition")
+
+
 def _test_forward_shape_validation() -> None:
     model, X, y = _make_fixed_case()
     try:
@@ -253,6 +323,34 @@ def _test_backward_with_numerical_gradients() -> None:
         _assert_close(analytical[name], numerical[name], name, atol=2e-6, rtol=2e-5)
 
 
+def _test_numerical_gradients_with_batch_and_single_output() -> None:
+    model = TwoLayerMLP(3, 2, 1, seed=0)
+    model.W1[:] = np.array([[0.2, -0.3], [0.4, 0.5], [-0.6, 0.7]])
+    model.b1[:] = np.array([0.4, -0.5])
+    model.W2[:] = np.array([[0.8], [-0.2]])
+    model.b2[:] = np.array([0.1])
+    X = np.array([[0.2, -0.1, 0.3], [-0.4, 0.6, 0.2], [0.1, 0.5, -0.2]])
+    y = np.array([[0.3], [-0.2], [0.8]])
+
+    model.forward(X, y)
+    analytical = model.backward()
+    numerical = {
+        "dX": _numerical_gradient(X, lambda: model.forward(X, y)[0]),
+        "dW1": _numerical_gradient(model.W1, lambda: model.forward(X, y)[0]),
+        "db1": _numerical_gradient(model.b1, lambda: model.forward(X, y)[0]),
+        "dW2": _numerical_gradient(model.W2, lambda: model.forward(X, y)[0]),
+        "db2": _numerical_gradient(model.b2, lambda: model.forward(X, y)[0]),
+    }
+    for name in ("dX", "dW1", "db1", "dW2", "db2"):
+        _assert_close(
+            analytical[name],
+            numerical[name],
+            f"single-output {name}",
+            atol=2e-6,
+            rtol=2e-5,
+        )
+
+
 def run_tests() -> bool:
     """Run all assignment tests and return True only when every test passes."""
     if np is None:
@@ -261,9 +359,14 @@ def run_tests() -> bool:
 
     tests = (
         ("forward values and input safety", _test_forward_values_and_input_safety),
+        ("forward with all ReLU units active", _test_forward_when_all_relu_units_are_active),
+        ("forward with all ReLU units inactive", _test_forward_when_all_relu_units_are_inactive),
+        ("ReLU zero derivative convention", _test_relu_zero_uses_zero_derivative),
+        ("batch loss decomposition", _test_batch_loss_equals_mean_of_sample_losses),
         ("forward shape validation", _test_forward_shape_validation),
         ("backward call order", _test_backward_requires_forward),
         ("backward numerical gradients", _test_backward_with_numerical_gradients),
+        ("single-output numerical gradients", _test_numerical_gradients_with_batch_and_single_output),
     )
     print("Two-Layer MLP Automated Tests")
     print("=" * 48)

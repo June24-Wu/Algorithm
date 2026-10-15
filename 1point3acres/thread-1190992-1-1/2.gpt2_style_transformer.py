@@ -87,6 +87,7 @@ from __future__ import annotations
 import argparse
 import base64
 import sys
+import token
 import zlib
 
 from numpy import var
@@ -101,8 +102,8 @@ def _softmax(x: np.ndarray, axis: int = -1) -> np.ndarray:
     """Compute a numerically stable softmax along the selected axis."""
     # ===================== Student section: softmax =====================
     # stable_softmax(x) = exp(x - max(x)) / sum(exp(x - max(x)))
-    x = np.exp(x - np.max(x,axis=-1,keepdims=True))
-    return x / np.sum(x,axis=-1,keepdims=True)
+    x = np.exp(x - np.max(x,axis=axis,keepdims=True)) # avoid float overflow
+    return x / np.sum(x,axis=axis,keepdims=True)
     # =================== End student section: softmax ===================
 
 
@@ -209,7 +210,8 @@ class MLP:
     def forward(self, x: np.ndarray) -> np.ndarray:
         """Apply the expansion, GELU, and projection layers."""
         # ======================= Student section: MLP ======================
-        raise NotImplementedError("Implement MLP.forward()")
+        # MLP(x) = GELU(x @ W1 + b1) @ W2 + b2
+        return _gelu(x @ self.W1 + self.b1) @ self.W2 + self.b2
         # ===================== End student section: MLP ====================
 
 
@@ -230,7 +232,10 @@ class GPT2Block:
     def forward(self, x: np.ndarray) -> np.ndarray:
         """Apply pre-norm attention and MLP residual branches."""
         # ================== Student section: GPT-2 block ==================
-        raise NotImplementedError("Implement GPT2Block.forward()")
+        # after_attention = x + Attention(LayerNorm1(x))
+        # output = after_attention + MLP(LayerNorm2(after_attention))
+        after_attention = x + self.attention.forward(self.ln1(x))
+        return after_attention + self.mlp.forward(self.ln2(after_attention))
         # ================ End student section: GPT-2 block ================
 
 
@@ -267,7 +272,16 @@ class TinyGPT2:
     def forward(self, token_ids: np.ndarray) -> np.ndarray:
         """Return next-token logits with shape (B, T, vocab_size)."""
         # ==================== Student section: TinyGPT2 ====================
-        raise NotImplementedError("Implement TinyGPT2.forward()")
+        token_ids = np.asarray(token_ids)
+        B, T = token_ids.shape
+
+        x = self.token_embedding[token_ids] + self.position_embedding[:T] # token embedding
+
+        for block in self.blocks:
+            x = block.forward(x)
+        x = self.ln_f(x)
+        return x @ self.token_embedding.T # Project hidden states to vocabulary logits.
+    
         # ================== End student section: TinyGPT2 ==================
 
 
@@ -306,6 +320,23 @@ def _test_softmax() -> None:
         raise AssertionError("softmax must remain finite for large input values")
 
 
+def _test_softmax_axis_and_shift_invariance() -> None:
+    x = np.array([[1.0, 3.0, -2.0], [-1.0, 0.0, 2.0]])
+    expected_axis_zero = np.array(
+        [
+            [0.8807970779778823, 0.9525741268224334, 0.01798620996209156],
+            [0.11920292202211755, 0.04742587317756678, 0.9820137900379085],
+        ]
+    )
+    actual = _softmax(x, axis=0)
+    _assert_close(actual, expected_axis_zero, "softmax axis=0")
+    _assert_close(
+        _softmax(x + 10000.0, axis=0),
+        actual,
+        "softmax translation invariance",
+    )
+
+
 def _test_gelu() -> None:
     x = np.array([-2.0, -1.0, 0.0, 1.0, 2.0])
     expected = np.array(
@@ -313,6 +344,15 @@ def _test_gelu() -> None:
          0.8411919906082768, 1.954597694087775]
     )
     _assert_close(_gelu(x), expected, "GELU")
+
+
+def _test_gelu_symmetry_relation() -> None:
+    x = np.array([-5.0, -1.3, -0.2, 0.7, 2.4, 6.0])
+    positive = _gelu(x)
+    negative = _gelu(-x)
+    _assert_close(positive - negative, x, "GELU symmetry relation")
+    if not np.all(np.isfinite(positive)):
+        raise AssertionError("GELU must return finite outputs for finite inputs")
 
 
 def _test_layer_norm() -> None:
@@ -335,6 +375,39 @@ def _test_layer_norm() -> None:
         affine_output,
         normalized * layer_norm.gamma + layer_norm.beta,
         "LayerNorm gamma and beta",
+    )
+
+
+def _test_layer_norm_shift_and_scale_invariance() -> None:
+    layer_norm = LayerNorm(4, epsilon=1e-12)
+    x = np.array(
+        [
+            [[-2.0, 0.5, 3.0, 7.0], [4.0, -1.0, 2.0, 9.0]],
+            [[0.2, 1.7, -3.4, 5.1], [8.0, 3.0, -2.0, 1.0]],
+        ]
+    )
+    original = layer_norm(x)
+    transformed = layer_norm(3.5 * x + 17.0)
+    _assert_close(
+        transformed,
+        original,
+        "LayerNorm positive-scale and shift invariance",
+        atol=1e-10,
+        rtol=1e-10,
+    )
+
+
+def _test_layer_norm_operates_independently_per_token() -> None:
+    layer_norm = LayerNorm(4)
+    x = np.array([[[1.0, -2.0, 4.0, 0.5], [3.0, 8.0, -1.0, 2.0]]])
+    changed = x.copy()
+    changed[:, 1, :] = np.array([-20.0, 7.0, 11.0, 4.0])
+    original_output = layer_norm(x)
+    changed_output = layer_norm(changed)
+    _assert_close(
+        changed_output[:, 0, :],
+        original_output[:, 0, :],
+        "LayerNorm token independence",
     )
 
 
@@ -372,6 +445,41 @@ def _test_attention_causality() -> None:
     )
 
 
+def _test_attention_uniform_prefix_average() -> None:
+    rng = np.random.default_rng(13)
+    attention = CausalSelfAttention(d_model=4, num_heads=2, rng=rng)
+    attention.Wq[:] = 0.0
+    attention.Wk[:] = 0.0
+    attention.Wv[:] = np.eye(4)
+    attention.Wo[:] = np.eye(4)
+    attention.bq[:] = 0.0
+    attention.bk[:] = 0.0
+    attention.bv[:] = 0.0
+    attention.bo[:] = 0.0
+    x = np.array([[[1.0, 2.0, 3.0, 4.0], [2.0, 0.0, -1.0, 6.0], [-3.0, 4.0, 5.0, -2.0]]])
+
+    output = attention.forward(x)
+    expected = np.stack(
+        [x[:, : position + 1, :].mean(axis=1) for position in range(x.shape[1])],
+        axis=1,
+    )
+    _assert_close(output, expected, "uniform causal prefix average")
+
+
+def _test_attention_single_token_has_unit_weight() -> None:
+    rng = np.random.default_rng(17)
+    attention = CausalSelfAttention(d_model=6, num_heads=3, rng=rng)
+    x = np.array([[[0.5, -1.0, 2.0, 0.3, -0.7, 1.2]]])
+    output = attention.forward(x)
+    expected = (x @ attention.Wv + attention.bv) @ attention.Wo + attention.bo
+    _assert_close(output, expected, "single-token attention output")
+    _assert_close(
+        attention.last_attention_weights,
+        np.ones((1, 3, 1, 1)),
+        "single-token attention weights",
+    )
+
+
 def _test_mlp() -> None:
     rng = np.random.default_rng(9)
     mlp = MLP(d_model=4, rng=rng)
@@ -385,6 +493,21 @@ def _test_mlp() -> None:
     _assert_close(mlp.forward(x), expected, "MLP output", atol=1e-7, rtol=1e-7)
 
 
+def _test_mlp_operates_independently_per_token() -> None:
+    rng = np.random.default_rng(19)
+    mlp = MLP(d_model=4, rng=rng)
+    x = np.array([[[0.1, 0.4, -0.2, 0.8], [1.2, -0.5, 0.3, -0.7]]])
+    changed = x.copy()
+    changed[:, 1, :] = np.array([-3.0, 2.0, 4.0, -1.0])
+    original_output = mlp.forward(x)
+    changed_output = mlp.forward(changed)
+    _assert_close(
+        changed_output[:, 0, :],
+        original_output[:, 0, :],
+        "MLP token independence",
+    )
+
+
 def _test_pre_norm_residual_positions() -> None:
     rng = np.random.default_rng(7)
     block = GPT2Block(d_model=8, num_heads=2, rng=rng)
@@ -396,6 +519,34 @@ def _test_pre_norm_residual_positions() -> None:
     expected = after_attention + block.mlp.forward(normalized_for_mlp)
     actual = block.forward(x)
     _assert_close(actual, expected, "GPT-2 pre-norm residual block")
+
+
+def _test_block_preserves_input_when_sublayer_outputs_are_zero() -> None:
+    rng = np.random.default_rng(23)
+    block = GPT2Block(d_model=8, num_heads=2, rng=rng)
+    block.attention.Wo[:] = 0.0
+    block.attention.bo[:] = 0.0
+    block.mlp.W2[:] = 0.0
+    block.mlp.b2[:] = 0.0
+    x = rng.normal(size=(2, 4, 8))
+    _assert_close(block.forward(x), x, "zero-sublayer residual identity")
+
+
+def _test_block_is_causal_end_to_end() -> None:
+    rng = np.random.default_rng(29)
+    block = GPT2Block(d_model=8, num_heads=2, rng=rng)
+    original = rng.normal(size=(1, 5, 8))
+    changed = original.copy()
+    changed[:, 3:, :] = rng.normal(size=(1, 2, 8)) * 20.0
+    original_output = block.forward(original)
+    changed_output = block.forward(changed)
+    _assert_close(
+        changed_output[:, :3, :],
+        original_output[:, :3, :],
+        "GPT-2 block causal prefix",
+        atol=1e-7,
+        rtol=1e-7,
+    )
 
 
 def _test_tiny_gpt2_end_to_end() -> None:
@@ -415,17 +566,79 @@ def _test_tiny_gpt2_end_to_end() -> None:
         raise AssertionError("logits must contain only finite values")
 
 
+def _test_tiny_gpt2_is_causal_end_to_end() -> None:
+    model = TinyGPT2(
+        vocab_size=11,
+        context_length=6,
+        d_model=8,
+        num_heads=2,
+        num_layers=2,
+        seed=31,
+    )
+    original = np.array([[1, 2, 3, 4, 5]])
+    changed = np.array([[1, 2, 3, 9, 7]])
+    original_logits = model.forward(original)
+    changed_logits = model.forward(changed)
+    _assert_close(
+        changed_logits[:, :3, :],
+        original_logits[:, :3, :],
+        "TinyGPT2 causal prefix logits",
+        atol=1e-7,
+        rtol=1e-7,
+    )
+
+
+def _test_tiny_gpt2_at_exact_context_length() -> None:
+    model = TinyGPT2(
+        vocab_size=9,
+        context_length=5,
+        d_model=8,
+        num_heads=2,
+        num_layers=1,
+        seed=37,
+    )
+    token_ids = np.array([[8, 1, 6, 2, 4], [0, 3, 7, 5, 1]])
+    logits = model.forward(token_ids)
+    if logits.shape != (2, 5, 9):
+        raise AssertionError(
+            f"max-context logits must have shape (2, 5, 9), got {logits.shape}"
+        )
+
+
 _TEST_GROUPS = {
-    "softmax": (("stable softmax", _test_softmax),),
-    "gelu": (("GELU values", _test_gelu),),
-    "layernorm": (("LayerNorm normalization and affine transform", _test_layer_norm),),
+    "softmax": (
+        ("stable softmax", _test_softmax),
+        ("axis selection and shift invariance", _test_softmax_axis_and_shift_invariance),
+    ),
+    "gelu": (
+        ("GELU values", _test_gelu),
+        ("GELU symmetry relation", _test_gelu_symmetry_relation),
+    ),
+    "layernorm": (
+        ("LayerNorm normalization and affine transform", _test_layer_norm),
+        ("LayerNorm shift and scale invariance", _test_layer_norm_shift_and_scale_invariance),
+        ("LayerNorm token independence", _test_layer_norm_operates_independently_per_token),
+    ),
     "attention": (
         ("attention mask and probabilities", _test_attention_mask_and_probabilities),
         ("attention causality", _test_attention_causality),
+        ("uniform causal prefix average", _test_attention_uniform_prefix_average),
+        ("single-token attention", _test_attention_single_token_has_unit_weight),
     ),
-    "mlp": (("MLP projection", _test_mlp),),
-    "block": (("pre-norm residual positions", _test_pre_norm_residual_positions),),
-    "model": (("TinyGPT2 end-to-end shape", _test_tiny_gpt2_end_to_end),),
+    "mlp": (
+        ("MLP projection", _test_mlp),
+        ("MLP token independence", _test_mlp_operates_independently_per_token),
+    ),
+    "block": (
+        ("pre-norm residual positions", _test_pre_norm_residual_positions),
+        ("zero-sublayer residual identity", _test_block_preserves_input_when_sublayer_outputs_are_zero),
+        ("block causal prefix", _test_block_is_causal_end_to_end),
+    ),
+    "model": (
+        ("TinyGPT2 end-to-end shape", _test_tiny_gpt2_end_to_end),
+        ("TinyGPT2 causal prefix", _test_tiny_gpt2_is_causal_end_to_end),
+        ("TinyGPT2 exact context length", _test_tiny_gpt2_at_exact_context_length),
+    ),
 }
 
 
