@@ -228,6 +228,13 @@ document.getElementById('theme-toggle').addEventListener('click', () => {
   savePreference('atlas-theme', theme);
   updateThemeToggle();
 });
+const fontSizeControl = document.getElementById('font-size');
+fontSizeControl.value = document.documentElement.dataset.fontSize || '18';
+fontSizeControl.addEventListener('change', () => {
+  document.documentElement.dataset.fontSize = fontSizeControl.value;
+  savePreference('atlas-font-size', fontSizeControl.value);
+  updateProgress();
+});
 document.querySelectorAll('[data-language]').forEach(button => button.addEventListener('click', () => { language = button.dataset.language; savePreference('atlas-language', language); render(); }));
 document.querySelector('.skip-link').addEventListener('click', event => { event.preventDefault(); const main = document.getElementById('main'); if (main) { main.setAttribute('tabindex', '-1'); main.focus(); main.scrollIntoView({ block: 'start' }); } });
 document.addEventListener('click', event => {
@@ -239,7 +246,7 @@ document.addEventListener('click', event => {
   }
   document.querySelectorAll('.search-wrap').forEach(wrapper => { if (!wrapper.contains(event.target)) wrapper.querySelector('.search-results').hidden = true; });
 });
-document.addEventListener('keydown', event => { if (event.key === '/' && !['INPUT', 'TEXTAREA'].includes(document.activeElement?.tagName)) { event.preventDefault(); document.querySelector('[data-search]')?.focus(); } if (event.key === 'Escape') { const wasOpen = document.body.classList.contains('nav-open'); closeMenu(); if (wasOpen) document.getElementById('menu-toggle')?.focus(); } });
+document.addEventListener('keydown', event => { if (event.key === '/' && !['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement?.tagName)) { event.preventDefault(); document.querySelector('[data-search]')?.focus(); } if (event.key === 'Escape') { const wasOpen = document.body.classList.contains('nav-open'); closeMenu(); if (wasOpen) document.getElementById('menu-toggle')?.focus(); } });
 window.addEventListener('hashchange', render);
 window.addEventListener('scroll', updateProgress, { passive: true });
 updateThemeToggle();

@@ -3,12 +3,6 @@ name: Deploy Algorithm Atlas
 on:
   push:
     branches: [master]
-    paths:
-      - "study_site/**"
-      - "AIInfraGuide_Interview/**"
-      - "1point3acres/**"
-      - "LeetGPU_Triton_Kernal/**"
-      - ".github/workflows/deploy-study-site.yml"
   pull_request:
     branches: [master]
     paths:
