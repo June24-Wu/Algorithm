@@ -1,0 +1,48 @@
+{
+  "repository": "https://github.com/June24-Wu/Algorithm",
+  "branch": "master",
+  "collections": [
+    {
+      "id": "ai-infra",
+      "directory": "AIInfraGuide_Interview",
+      "title": "AI Infra Guide",
+      "description": "The reasoning behind performant systems. Interview questions, worked examples, and answers worth understanding.",
+      "eyebrow": "Systems & interviews",
+      "color": "olive",
+      "icon": "layers",
+      "tags": ["Performance", "Distributed systems", "Attention"],
+      "source": "https://caomaolufei.github.io/AIInfraGuide/interview/"
+    },
+    {
+      "id": "1point3acres",
+      "directory": "1point3acres",
+      "title": "1Point3Acres",
+      "description": "Learn by implementing. Small, testable assignments that make neural networks and inference mechanisms concrete.",
+      "eyebrow": "Models & implementation",
+      "color": "clay",
+      "icon": "code",
+      "tags": ["NumPy", "Transformers", "From scratch"],
+      "source": "https://www.1point3acres.com/bbs/thread-1190992-1-1.html"
+    },
+    {
+      "id": "leetgpu",
+      "directory": "LeetGPU_Triton_Kernal",
+      "title": "LeetGPU",
+      "description": "A closer look at the hardware. GPU programming exercises, parallel primitives, and Triton kernel implementations.",
+      "eyebrow": "Kernels & parallelism",
+      "color": "blue",
+      "icon": "chip",
+      "tags": ["Triton", "GEMM", "GPU programming"],
+      "source": "https://leetgpu.com/"
+    }
+  ],
+  "directory_titles": {
+    "comprehensive": {"en": "Comprehensive interviews", "zh": "综合面经"},
+    "general": {"en": "General", "zh": "综合"},
+    "ai-infra-first-round": {"en": "AI Infra First Round", "zh": "AI Infra 一面"},
+    "thread-1190992-1-1": {"en": "LLM fundamentals", "zh": "LLM fundamentals"}
+  },
+  "translations": {
+    "AIInfraGuide_Interview/comprehensive/general/ai-infra-first-round/README.md": "content/zh/ai-infra-first-round.md"
+  }
+}
